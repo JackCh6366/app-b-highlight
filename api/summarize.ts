@@ -194,6 +194,7 @@ export function buildSystemInstruction(options: any) {
 【總結模式方針】：${modeDesc}
 【目標輸出語言】：必須全程使用【${targetLang}】輸出內容，語句流暢專業，專有名詞可附帶英文原名。
 【摘要深度要求】：${targetLength}（請盡可能詳細且深入，條列式列表要發揮豐富詳實的說明內容，切勿過度簡略，盡量涵蓋文中所有重要數據、推論、技術細節與論點）。
+【嚴格輸出規範】：請嚴格遵守以下輸出規範與結構，保持精確嚴謹，避免發散內容。
 ${customInstruction}
 
 【詳細輸出指導原則】：
@@ -459,10 +460,9 @@ ${rawText}
           systemInstruction,
           responseMimeType: 'application/json',
           responseSchema,
-          temperature: 0.2,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingBudget: 2048 },
-        },
+          thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'high' : 'medium' },
+        } as any,
       });
 
       const resultText = response.text || '{}';

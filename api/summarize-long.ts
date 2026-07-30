@@ -139,10 +139,9 @@ export default async function handler(req: any, res: any) {
             config: {
               systemInstruction,
               responseMimeType: 'application/json',
-              temperature: 0.2,
               maxOutputTokens: 32000,
-              thinkingConfig: { thinkingBudget: 2048 },
-            },
+              thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'high' : 'medium' },
+            } as any,
           });
           const resultText = response.text || '{}';
           let parsedData = safeParseJSON(resultText);
@@ -191,9 +190,9 @@ export default async function handler(req: any, res: any) {
           model: selectedModel,
           contents: mapPrompt,
           config: {
-            temperature: 0.2,
             maxOutputTokens: 4096,
-          },
+            thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'high' : 'medium' },
+          } as any,
         });
         chunkResults.push(`【段落 ${i + 1} 分析筆記】：\n${response.text || ''}`);
       }
@@ -346,10 +345,9 @@ ${combinedNotes}
           systemInstruction,
           responseMimeType: 'application/json',
           responseSchema,
-          temperature: 0.2,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingBudget: 2048 },
-        },
+          thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'high' : 'medium' },
+        } as any,
       });
 
       const resultText = response.text || '{}';

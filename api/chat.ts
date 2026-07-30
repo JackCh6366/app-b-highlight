@@ -101,8 +101,8 @@ ${rawTextSnippet ? `【文件內容片段】：\n${rawTextSnippet.slice(0, 8000)
         history: chatHistory,
         config: {
           systemInstruction,
-          temperature: 0.3,
-        },
+          thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'high' : 'medium' },
+        } as any,
       });
 
       const response = await chat.sendMessage({ message: lastUserMessage });

@@ -175,11 +175,23 @@ export const OptionsConfigSection: React.FC<OptionsConfigSectionProps> = ({
               <option value="nvidia_nim::meta/llama-3.2-11b-vision-instruct">
                 meta/llama-3.2-11b-vision-instruct{isScanned ? '（✓ 支援視覺）' : ''}
               </option>
+              <option value="nvidia_nim::meta/llama-4-maverick-17b-128e-instruct">
+                meta/llama-4-maverick-17b-128e-instruct{isScanned ? '（✓ 支援視覺）' : ''}
+              </option>
               <option value="nvidia_nim::microsoft/phi-4-multimodal-instruct">
                 microsoft/phi-4-multimodal-instruct{isScanned ? '（✓ 支援視覺）' : ''}
               </option>
+              <option value="nvidia_nim::mistralai/mistral-small-3.1-24b-instruct-2503" disabled={isScanned}>
+                mistralai/mistral-small-3.1-24b-instruct-2503（中型快速多模態）{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
+              <option value="nvidia_nim::nvidia/llama-3.3-nemotron-super-49b-v1.5" disabled={isScanned}>
+                nvidia/llama-3.3-nemotron-super-49b-v1.5（中型高精準推理）{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
               <option value="nvidia_nim::mistralai/mistral-nemotron" disabled={isScanned}>
                 mistralai/mistral-nemotron{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
+              <option value="nvidia_nim::mistralai/mistral-small-4-119b-2603" disabled={isScanned}>
+                mistralai/mistral-small-4-119b-2603{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
               </option>
               <option value="nvidia_nim::google/gemma-3-27b-it" disabled={isScanned}>
                 google/gemma-3-27b-it{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
