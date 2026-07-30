@@ -101,7 +101,6 @@ ${rawTextSnippet ? `【文件內容片段】：\n${rawTextSnippet.slice(0, 8000)
         history: chatHistory,
         config: {
           systemInstruction,
-          thinkingConfig: { thinkingBudget: selectedModel.includes('flash-lite') ? 4096 : 2048 },
         },
       });
 

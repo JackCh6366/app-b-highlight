@@ -24,8 +24,8 @@ function getNvidiaClient() {
   return new OpenAI({
     baseURL: 'https://integrate.api.nvidia.com/v1',
     apiKey,
-    timeout: 60000,
-    maxRetries: 2,
+    timeout: 25000,
+    maxRetries: 0,
   });
 }
 
@@ -309,7 +309,6 @@ export default async function handler(req: any, res: any) {
               systemInstruction,
               responseMimeType: 'application/json',
               maxOutputTokens: 32000,
-              thinkingConfig: { thinkingBudget: selectedModel.includes('flash-lite') ? 4096 : 2048 },
             },
           });
           const resultText = response.text || '{}';
@@ -332,68 +331,69 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Use larger chunks (15000 chars) to reduce the number of API calls and stay within timeout
-    const chunks = chunkText(activeText, 15000);
-    // Cap chunks to avoid timeout on extremely long documents
-    const maxChunks = 4;
-    const effectiveChunks = chunks.length > maxChunks ? chunks.slice(0, maxChunks) : chunks;
+    // For NVIDIA: skip Map phase entirely — single call with truncated text to stay within timeout
+    // For Gemini: use parallel map-reduce since it's fast enough
 
-    // Map Phase: Process chunks in parallel batches (up to 3 concurrent) for speed
-    const chunkResults = await processInParallelBatches(effectiveChunks, 3, async (chunk, i) => {
-      const mapPrompt = `請簡要分析以下長文件第 ${i + 1} / ${effectiveChunks.length} 段落內容，提取核心概念與重要數據：\n\n${chunk}`;
+    if (provider === 'nvidia') {
+      // NVIDIA models are slower; send truncated raw text directly in one call
+      const truncatedText = activeText.slice(0, 30000);
+      const systemInstruction = buildSystemInstruction(options);
+      const nvidia = getNvidiaClient();
+      const nvidiaPrompt = `${systemInstruction}
 
-      if (provider === 'nvidia') {
-        const nvidia = getNvidiaClient();
-        const completion = await nvidia.chat.completions.create({
-          model: selectedModel,
-          messages: [{ role: 'user', content: mapPrompt }],
-          temperature: 0.2,
-          max_tokens: 1500,
-        });
-        return `【段落 ${i + 1} 分析筆記】：\n${completion.choices[0]?.message?.content || ''}`;
-      } else {
+【文件標題/檔名】：${fileName || '長文件'}
+【文件原文內容（截取前 30000 字元）】：
+${truncatedText}
+
+請根據上述文件內容，彙整生成完整的 JSON 結構化筆記。
+請務必以純 JSON 格式回應 (Strict JSON Only)，包含以下結構：
+{
+  "documentTitle": "...",
+  "executiveSummary": "...",
+  "mindmap": { "id": "0", "label": "...", "children": [{ "id": "0-0", "label": "...", "children": [] }] },
+  "keyTakeaways": [{ "title": "...", "points": ["..."] }],
+  "structuredOutline": [{ "section": "...", "summary": "...", "points": ["..."], "subSections": [{ "title": "...", "detail": "..." }] }],
+  "keyTerms": [{ "term": "...", "definition": "...", "context": "..." }],
+  "flashcards": [{ "question": "...", "answer": "...", "tag": "..." }],
+  "actionablePoints": ["..."],
+  "importantQuotes": ["..."],
+  "suggestedQuestions": ["..."]
+}`;
+
+      const completion = await nvidia.chat.completions.create({
+        model: selectedModel,
+        messages: [{ role: 'user', content: nvidiaPrompt }],
+        temperature: 0.2,
+        max_tokens: 8000,
+      });
+
+      const rawOutput = completion.choices[0]?.message?.content || '{}';
+      let parsedData = safeParseJSON(rawOutput);
+      if (parsedData && parsedData.mindmap) {
+        parsedData.mindmap = sanitizeMindMap(parsedData.mindmap, '0');
+      }
+      return res.status(200).json({ success: true, chunksCount: 1, data: parsedData });
+    } else {
+      // Gemini path: use parallel map-reduce
+      const chunks = chunkText(activeText, 15000);
+      const maxChunks = 4;
+      const effectiveChunks = chunks.length > maxChunks ? chunks.slice(0, maxChunks) : chunks;
+
+      const chunkResults = await processInParallelBatches(effectiveChunks, 3, async (chunk, i) => {
+        const mapPrompt = `請簡要分析以下長文件第 ${i + 1} / ${effectiveChunks.length} 段落內容，提取核心概念與重要數據：\n\n${chunk}`;
         const ai = getGenAI();
         const response = await ai.models.generateContent({
           model: selectedModel,
           contents: mapPrompt,
           config: {
             maxOutputTokens: 2048,
-            thinkingConfig: { thinkingBudget: 0 },
           },
         });
         return `【段落 ${i + 1} 分析筆記】：\n${response.text || ''}`;
-      }
-    });
+      });
 
-    // Reduce Phase: Combine all chunk notes into single structured summary
-    const combinedNotes = chunkResults.join('\n\n---\n\n');
-    const systemInstruction = buildSystemInstruction(options);
-    let parsedData: any;
-
-    if (provider === 'nvidia') {
-      const nvidia = getNvidiaClient();
-      const nvidiaPrompt = `${systemInstruction}
-
-【文件標題/檔名】：${fileName || '長文件'}
-【長文件全篇分段研析彙整資訊】：
-${combinedNotes}
-
-請根據上述全篇各分段研析資訊，彙整生成完整的 JSON 結構化筆記。`;
-
-      const completion = await nvidia.chat.completions.create({
-        model: selectedModel,
-        messages: [{ role: 'user', content: nvidiaPrompt }],
-        temperature: 0.2,
-        max_tokens: 16000,
-        extra_body: {
-          chat_template_kwargs: { enable_thinking: true },
-          reasoning_budget: 4096,
-        },
-      } as any);
-
-      const rawOutput = completion.choices[0]?.message?.content || '{}';
-      parsedData = safeParseJSON(rawOutput);
-    } else {
+      const combinedNotes = chunkResults.join('\n\n---\n\n');
+      const systemInstruction = buildSystemInstruction(options);
       const ai = getGenAI();
       const reduceContent = `【文件標題/檔名】：${fileName || '長文件'}\n\n【長文件全篇分段研析彙整資訊】：\n${combinedNotes}`;
 
@@ -513,23 +513,20 @@ ${combinedNotes}
           responseMimeType: 'application/json',
           responseSchema,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingBudget: 0 },
         },
       });
 
       const resultText = response.text || '{}';
-      parsedData = safeParseJSON(resultText);
+      let parsedData = safeParseJSON(resultText);
+      if (parsedData && parsedData.mindmap) {
+        parsedData.mindmap = sanitizeMindMap(parsedData.mindmap, '0');
+      }
+      return res.status(200).json({
+        success: true,
+        chunksCount: effectiveChunks.length,
+        data: parsedData,
+      });
     }
-
-    if (parsedData && parsedData.mindmap) {
-      parsedData.mindmap = sanitizeMindMap(parsedData.mindmap, '0');
-    }
-
-    return res.status(200).json({
-      success: true,
-      chunksCount: chunks.length,
-      data: parsedData,
-    });
   } catch (error: any) {
     console.error('Summarize-long error:', error);
     let errMsg = error?.message || '長文件分段歸納處理失敗，請重試。';

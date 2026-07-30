@@ -24,8 +24,8 @@ function getNvidiaClient() {
   return new OpenAI({
     baseURL: 'https://integrate.api.nvidia.com/v1',
     apiKey,
-    timeout: 60000,
-    maxRetries: 2,
+    timeout: 50000,
+    maxRetries: 0,
   });
 }
 
@@ -292,12 +292,8 @@ ${rawText}
         model: selectedModel,
         messages: [{ role: 'user', content: nvidiaPrompt }],
         temperature: 0.2,
-        max_tokens: 16000,
-        extra_body: {
-          chat_template_kwargs: { enable_thinking: true },
-          reasoning_budget: 4096,
-        },
-      } as any);
+        max_tokens: 8000,
+      });
 
       const rawOutput = completion.choices[0]?.message?.content || '{}';
       parsedData = safeParseJSON(rawOutput);
@@ -460,7 +456,6 @@ ${rawText}
           responseMimeType: 'application/json',
           responseSchema,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingBudget: 0 },
         },
       });
 
