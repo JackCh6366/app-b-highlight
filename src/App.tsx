@@ -52,6 +52,9 @@ export default function App() {
     }
 
     try {
+      // Optimization: Only send pdfBase64 if document is scanned or has no text layer, preventing Vercel 4.5MB payload limit error
+      const shouldSendPdfBase64 = currentFile.isScanned || !currentFile.rawText || currentFile.rawText.trim().length === 0;
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -59,7 +62,7 @@ export default function App() {
         },
         body: JSON.stringify({
           rawText: currentFile.rawText || '',
-          pdfBase64: currentFile.base64Data || null,
+          pdfBase64: shouldSendPdfBase64 ? (currentFile.base64Data || null) : null,
           fileName: currentFile.name,
           isScanned: currentFile.isScanned || false,
           options,
@@ -82,9 +85,14 @@ export default function App() {
       setSummaryResult(data.data);
     } catch (err: any) {
       console.error('Summarize failed', err);
-      const msg = err.message === 'Failed to fetch' 
-        ? '無法連線至後端服務，可能是網路中斷、檔案過大或伺服器正在重新啟動中。'
-        : (err.message || '連線至 AI 服務失敗，請檢查 API Key 或網路狀態。');
+      let msg = err.message || '';
+      if (msg.includes('PAYLOAD_TOO_LARGE') || msg.includes('413') || msg.includes('Request Entity Too Large')) {
+        msg = '上傳的檔案傳輸資料量過大（超過 Vercel 雲端 API 4.5MB 限制）。請注意：若是掃描版 PDF 請壓縮檔案或裁切頁數；純文字 PDF 可直接抽取文字後處理。';
+      } else if (msg === 'Failed to fetch') {
+        msg = '無法連線至後端服務，可能是網路中斷、檔案過大或伺服器正在重新啟動中。';
+      } else if (!msg) {
+        msg = '連線至 AI 服務失敗，請檢查 API Key 或網路狀態。';
+      }
       setErrorMessage(msg);
     } finally {
       setIsLoading(false);

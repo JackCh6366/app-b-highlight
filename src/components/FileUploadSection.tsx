@@ -65,6 +65,9 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
               throw new Error(data.error || 'PDF 檔案文字擷取失敗');
             }
 
+            // For non-scanned PDFs (standard text layer present), we don't need to keep heavy base64Data in state
+            const keepBase64 = data.isScanned ? base64Data : undefined;
+
             onFileLoaded({
               id: 'file_' + Date.now(),
               name: fileName,
@@ -73,7 +76,7 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
               uploadDate: new Date().toLocaleDateString('zh-TW'),
               wordCount: data.wordCount || Math.round(fileSize / 10),
               rawText: data.text || '',
-              base64Data,
+              base64Data: keepBase64,
               mimeType: 'application/pdf',
               isScanned: data.isScanned,
               pageCount: data.pageCount,
