@@ -33,7 +33,26 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function chunkText(rawText: string, maxChunkLength = 8000): string[] {
+// Process chunks in parallel batches to reduce total execution time
+async function processInParallelBatches<T>(items: T[], batchSize: number, fn: (item: T, index: number) => Promise<string>): Promise<string[]> {
+  const results: string[] = new Array(items.length);
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map((item, batchIdx) => fn(item, i + batchIdx))
+    );
+    batchResults.forEach((r, batchIdx) => {
+      results[i + batchIdx] = r;
+    });
+    // Small delay between batches to respect rate limits
+    if (i + batchSize < items.length) {
+      await delay(200);
+    }
+  }
+  return results;
+}
+
+function chunkText(rawText: string, maxChunkLength = 15000): string[] {
   if (!rawText || rawText.length <= maxChunkLength) return [rawText];
 
   const chunks: string[] = [];
@@ -313,17 +332,15 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const chunks = chunkText(activeText, 8000);
-    const chunkResults: string[] = [];
+    // Use larger chunks (15000 chars) to reduce the number of API calls and stay within timeout
+    const chunks = chunkText(activeText, 15000);
+    // Cap chunks to avoid timeout on extremely long documents
+    const maxChunks = 4;
+    const effectiveChunks = chunks.length > maxChunks ? chunks.slice(0, maxChunks) : chunks;
 
-    // Map Phase: Process chunk by chunk with delay throttle (400ms) to respect rate limits
-    for (let i = 0; i < chunks.length; i++) {
-      if (i > 0) {
-        await delay(400); // 400ms throttling between chunks
-      }
-
-      const chunk = chunks[i];
-      const mapPrompt = `請詳細分析以下長文件第 ${i + 1} / ${chunks.length} 段落內容，提取該段落的核心概念、章節大綱與重要數據說明：\n\n${chunk}`;
+    // Map Phase: Process chunks in parallel batches (up to 3 concurrent) for speed
+    const chunkResults = await processInParallelBatches(effectiveChunks, 3, async (chunk, i) => {
+      const mapPrompt = `請簡要分析以下長文件第 ${i + 1} / ${effectiveChunks.length} 段落內容，提取核心概念與重要數據：\n\n${chunk}`;
 
       if (provider === 'nvidia') {
         const nvidia = getNvidiaClient();
@@ -331,22 +348,22 @@ export default async function handler(req: any, res: any) {
           model: selectedModel,
           messages: [{ role: 'user', content: mapPrompt }],
           temperature: 0.2,
-          max_tokens: 2048,
+          max_tokens: 1500,
         });
-        chunkResults.push(`【段落 ${i + 1} 分析筆記】：\n${completion.choices[0]?.message?.content || ''}`);
+        return `【段落 ${i + 1} 分析筆記】：\n${completion.choices[0]?.message?.content || ''}`;
       } else {
         const ai = getGenAI();
         const response = await ai.models.generateContent({
           model: selectedModel,
           contents: mapPrompt,
           config: {
-            maxOutputTokens: 4096,
-            thinkingConfig: { thinkingBudget: selectedModel.includes('flash-lite') ? 4096 : 2048 },
+            maxOutputTokens: 2048,
+            thinkingConfig: { thinkingBudget: 0 },
           },
         });
-        chunkResults.push(`【段落 ${i + 1} 分析筆記】：\n${response.text || ''}`);
+        return `【段落 ${i + 1} 分析筆記】：\n${response.text || ''}`;
       }
-    }
+    });
 
     // Reduce Phase: Combine all chunk notes into single structured summary
     const combinedNotes = chunkResults.join('\n\n---\n\n');
@@ -496,7 +513,7 @@ ${combinedNotes}
           responseMimeType: 'application/json',
           responseSchema,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingBudget: selectedModel.includes('flash-lite') ? 4096 : 2048 },
+          thinkingConfig: { thinkingBudget: 0 },
         },
       });
 

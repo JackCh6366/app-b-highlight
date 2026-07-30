@@ -5,6 +5,15 @@
     },
     "api/summarize-long.ts": {
       "maxDuration": 60
+    },
+    "api/chat.ts": {
+      "maxDuration": 60
+    },
+    "api/parse-pdf.ts": {
+      "maxDuration": 30
+    },
+    "api/parse-doc.ts": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
@@ -18,3 +27,4 @@
     }
   ]
 }
+

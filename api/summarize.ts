@@ -460,7 +460,7 @@ ${rawText}
           responseMimeType: 'application/json',
           responseSchema,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingBudget: selectedModel.includes('flash-lite') ? 4096 : 2048 },
+          thinkingConfig: { thinkingBudget: 0 },
         },
       });
 
