@@ -1,7 +1,4 @@
-// pdf-parse v1 is CJS-only; use createRequire for ESM compatibility
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+import { extractText, getDocumentProxy } from 'unpdf';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
@@ -19,9 +16,11 @@ export default async function handler(req: any, res: any) {
     const cleanBase64 = typeof base64Input === 'string' ? base64Input.replace(/^data:[^;]+;base64,/, '') : base64Input;
     const buffer = Buffer.from(cleanBase64, 'base64');
 
-    const pdfData = await pdfParse(buffer);
-    const rawText: string = pdfData.text || '';
-    const pageCount: number = pdfData.numpages || 1;
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text, totalPages } = await extractText(pdf, { mergePages: true });
+
+    const rawText: string = Array.isArray(text) ? text.join('\n\n') : (text || '');
+    const pageCount: number = totalPages || 1;
 
     const englishWords = (rawText.match(/[a-zA-Z0-9]+/g) || []).length;
     const chineseChars = (rawText.match(/[\u4e00-\u9fa5]/g) || []).length;
