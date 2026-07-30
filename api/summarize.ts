@@ -461,7 +461,7 @@ ${rawText}
           responseMimeType: 'application/json',
           responseSchema,
           maxOutputTokens: 32000,
-          thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'high' : 'medium' },
+          thinkingConfig: { thinkingLevel: selectedModel.includes('flash-lite') ? 'HIGH' : 'MEDIUM' },
         } as any,
       });
 
