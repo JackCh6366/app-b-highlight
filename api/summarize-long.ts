@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
-import { sanitizeMindMap, buildSystemInstruction } from './summarize';
+import { safeParseJSON, sanitizeMindMap, buildSystemInstruction } from '../lib/ai-helpers';
 
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -67,35 +67,7 @@ function chunkText(rawText: string, maxChunkLength = 8000): string[] {
   return finalChunks;
 }
 
-function safeParseJSON(jsonString: string): any {
-  if (!jsonString) return {};
-  let cleaned = jsonString.trim();
-  const codeBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (codeBlockMatch) {
-    cleaned = codeBlockMatch[1].trim();
-  } else {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  }
-  const firstBrace = cleaned.search(/[\{\[]/);
-  if (firstBrace > 0) {
-    cleaned = cleaned.substring(firstBrace);
-  }
 
-  try {
-    return JSON.parse(cleaned);
-  } catch (_) {
-    try {
-      const sanitized = cleaned.replace(/[\u0000-\u001F\u007F-\u009F]/g, (c) => {
-        if (c === '\n') return '\\n';
-        if (c === '\r') return '\\r';
-        if (c === '\t') return '\\t';
-        return '';
-      });
-      return JSON.parse(sanitized);
-    } catch (_) {}
-  }
-  return {};
-}
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
