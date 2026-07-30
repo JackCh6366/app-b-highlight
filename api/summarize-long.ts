@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import OpenAI from 'openai';
-import { safeParseJSON, sanitizeMindMap, buildSystemInstruction } from '../lib/ai-helpers';
+import { safeParseJSON, sanitizeMindMap, buildSystemInstruction } from './_lib/ai-helpers';
 
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
