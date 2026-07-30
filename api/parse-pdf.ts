@@ -15,9 +15,9 @@ export default async function handler(req: any, res: any) {
 
     const cleanBase64 = typeof base64Input === 'string' ? base64Input.replace(/^data:[^;]+;base64,/, '') : base64Input;
     const buffer = Buffer.from(cleanBase64, 'base64');
+    const dataArray = new Uint8Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
 
-    const pdf = await getDocumentProxy(new Uint8Array(buffer));
-    const { text, totalPages } = await extractText(pdf, { mergePages: true });
+    const { text, totalPages } = await extractText(dataArray, { mergePages: true });
 
     const rawText: string = Array.isArray(text) ? text.join('\n\n') : (text || '');
     const pageCount: number = totalPages || 1;
