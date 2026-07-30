@@ -1,0 +1,6 @@
+{
+  "name": "DocMind - PDF 與 Word 智慧文件摘要筆記歸納工具",
+  "description": "上傳或貼上 PDF、Word (.docx) 文件，自動提取關鍵重點、結構化章節大綱、金句與專有名詞考點，並支援匯出繁體中文筆記檔與 AI 互動問答。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
