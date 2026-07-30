@@ -28,14 +28,19 @@ export interface OutlineSection {
   }[];
 }
 
+export interface KeyTakeawayItem {
+  title: string;
+  points: string[];
+}
+
 export interface DocumentSummaryResult {
   documentTitle: string;
   executiveSummary: string;
-  keyTakeaways: string[];
+  mindmap: MindMapNode;
+  keyTakeaways: KeyTakeawayItem[];
   structuredOutline: OutlineSection[];
   keyTerms: KeyTerm[];
   flashcards: Flashcard[];
-  mindmap: MindMapNode;
   actionablePoints: string[];
   importantQuotes: string[];
   suggestedQuestions: string[];
@@ -51,6 +56,8 @@ export interface FileMetadata {
   rawText?: string;
   base64Data?: string; // For PDF base64
   mimeType?: string;
+  isScanned?: boolean;
+  pageCount?: number;
 }
 
 export type SummaryMode = 'comprehensive' | 'concise' | 'academic' | 'exam_prep' | 'business' | 'quick_reading';
@@ -63,6 +70,10 @@ export interface SummaryOptions {
   includeExamCards: boolean;
   includeTerms: boolean;
   includeMindmap: boolean;
+  aiProvider?: string;
+  aiModel?: string;
+  provider?: 'gemini' | 'nvidia';
+  model?: string;
 }
 
 export interface ChatMessage {

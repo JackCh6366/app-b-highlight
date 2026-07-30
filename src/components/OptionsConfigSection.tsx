@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sliders, Sparkles, Layers, CheckSquare, Languages, MessageSquare } from 'lucide-react';
+import { Sliders, Sparkles, Layers, CheckSquare, Languages, MessageSquare, Cpu } from 'lucide-react';
 import { SummaryOptions, SummaryMode } from '../types';
 
 interface OptionsConfigSectionProps {
@@ -7,6 +7,8 @@ interface OptionsConfigSectionProps {
   setOptions: React.Dispatch<React.SetStateAction<SummaryOptions>>;
   onStartSummarize: () => void;
   isLoading: boolean;
+  loadingStatusMessage?: string | null;
+  isScanned?: boolean;
   disabled: boolean;
 }
 
@@ -15,6 +17,8 @@ export const OptionsConfigSection: React.FC<OptionsConfigSectionProps> = ({
   setOptions,
   onStartSummarize,
   isLoading,
+  loadingStatusMessage,
+  isScanned,
   disabled,
 }) => {
   const modes: { id: SummaryMode; label: string; desc: string; num: string }[] = [
@@ -129,6 +133,66 @@ export const OptionsConfigSection: React.FC<OptionsConfigSectionProps> = ({
           </div>
         </div>
 
+        {/* Model Selector & Target Language Row */}
+        <div>
+          <label className="block text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]/70 mb-2 flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 text-[#1A1A1A]" /> AI 核心推論模型 (Model Selector)：
+          </label>
+          <select
+            value={
+              options.aiProvider && options.aiModel
+                ? `${options.aiProvider}::${options.aiModel}`
+                : options.model
+                ? (options.provider === 'nvidia' ? `nvidia_nim::${options.model}` : `gemini::${options.model}`)
+                : 'gemini::gemini-3.6-flash'
+            }
+            onChange={(e) => {
+              const val = e.target.value;
+              const parts = val.split('::');
+              const provider = parts[0];
+              const model = parts[1];
+              setOptions((prev) => ({
+                ...prev,
+                aiProvider: provider,
+                aiModel: model,
+                provider: provider === 'gemini' ? 'gemini' : 'nvidia',
+                model: model,
+              }));
+            }}
+            className="w-full px-4 py-2 bg-[#F9F8F6] border border-[#1A1A1A]/20 text-[#1A1A1A] text-xs font-bold focus:outline-none focus:border-[#1A1A1A]"
+          >
+            <optgroup label="Google Gemini API">
+              <option value="gemini::gemini-3.6-flash">gemini-3.6-flash（深度模式（預設））</option>
+              <option value="gemini::gemini-3.5-flash-lite">gemini-3.5-flash-lite（快速模式）</option>
+            </optgroup>
+            <optgroup label="NVIDIA NIM (OpenAI 相容端點)">
+              <option value="nvidia_nim::nvidia/nemotron-3-ultra-550b-a55b" disabled={isScanned}>
+                nvidia/nemotron-3-ultra-550b-a55b（深度推理（NVIDIA 旗艦））{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
+              <option value="nvidia_nim::meta/llama-3.3-70b-instruct" disabled={isScanned}>
+                meta/llama-3.3-70b-instruct{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
+              <option value="nvidia_nim::meta/llama-3.2-11b-vision-instruct">
+                meta/llama-3.2-11b-vision-instruct{isScanned ? '（✓ 支援視覺）' : ''}
+              </option>
+              <option value="nvidia_nim::microsoft/phi-4-multimodal-instruct">
+                microsoft/phi-4-multimodal-instruct{isScanned ? '（✓ 支援視覺）' : ''}
+              </option>
+              <option value="nvidia_nim::mistralai/mistral-nemotron" disabled={isScanned}>
+                mistralai/mistral-nemotron{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
+              <option value="nvidia_nim::google/gemma-3-27b-it" disabled={isScanned}>
+                google/gemma-3-27b-it{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              </option>
+            </optgroup>
+          </select>
+          {isScanned && (
+            <p className="text-[10px] text-amber-700 mt-1.5 font-semibold">
+              ⚠ 偵測到掃描版 PDF，標有「⚠ 掃描版 PDF 不支援」之模型無法處理此檔案，請選擇具備視覺能力之模型。
+            </p>
+          )}
+        </div>
+
         {/* Target Language */}
         <div>
           <label className="block text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]/70 mb-2 flex items-center gap-1.5">
@@ -209,7 +273,7 @@ export const OptionsConfigSection: React.FC<OptionsConfigSectionProps> = ({
           {isLoading ? (
             <>
               <div className="w-4 h-4 border-2 border-[#F9F8F6]/30 border-t-[#F9F8F6] rounded-full animate-spin"></div>
-              <span>Gemini AI 正在深度閱讀與研析文本中...</span>
+              <span>{loadingStatusMessage || 'AI 正在深度閱讀與研析文本中...'}</span>
             </>
           ) : (
             <>

@@ -47,26 +47,54 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
 
     try {
       if (lowerName.endsWith('.pdf')) {
-        // PDF: Convert to base64 for Gemini API direct native PDF vision parsing
+        // PDF: Convert to base64 and parse text with pdf-parse via /api/parse-pdf
         const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          // Strip data URI header if present
-          const base64Data = result.includes(',') ? result.split(',')[1] : result;
-          
-          const estimatedWords = Math.round(fileSize / 10);
+        reader.onload = async () => {
+          try {
+            const result = reader.result as string;
+            const base64Data = result.includes(',') ? result.split(',')[1] : result;
 
-          onFileLoaded({
-            id: 'file_' + Date.now(),
-            name: fileName,
-            size: fileSize,
-            type: 'pdf',
-            uploadDate: new Date().toLocaleDateString('zh-TW'),
-            wordCount: estimatedWords,
-            base64Data,
-            mimeType: 'application/pdf',
-          });
-          setIsParsing(false);
+            const res = await fetch('/api/parse-pdf', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pdfBase64: base64Data }),
+            });
+
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+              throw new Error(data.error || 'PDF 檔案文字擷取失敗');
+            }
+
+            onFileLoaded({
+              id: 'file_' + Date.now(),
+              name: fileName,
+              size: fileSize,
+              type: 'pdf',
+              uploadDate: new Date().toLocaleDateString('zh-TW'),
+              wordCount: data.wordCount || Math.round(fileSize / 10),
+              rawText: data.text || '',
+              base64Data,
+              mimeType: 'application/pdf',
+              isScanned: data.isScanned,
+              pageCount: data.pageCount,
+            });
+            setIsParsing(false);
+          } catch (err: any) {
+            console.error('PDF parsing failed:', err);
+            // Fallback: still load PDF with base64 for Gemini vision
+            onFileLoaded({
+              id: 'file_' + Date.now(),
+              name: fileName,
+              size: fileSize,
+              type: 'pdf',
+              uploadDate: new Date().toLocaleDateString('zh-TW'),
+              wordCount: Math.round(fileSize / 10),
+              rawText: '',
+              base64Data: (reader.result as string).split(',')[1] || (reader.result as string),
+              mimeType: 'application/pdf',
+            });
+            setIsParsing(false);
+          }
         };
         reader.onerror = () => {
           setParseError('PDF 讀取失敗，請重試。');
@@ -74,30 +102,44 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
         };
         reader.readAsDataURL(file);
       } else if (lowerName.endsWith('.docx') || lowerName.endsWith('.doc')) {
-        // Word file: send to backend /api/parse-doc with mammoth
-        const formData = new FormData();
-        formData.append('file', file);
+        // Word file: read as base64 and send to /api/parse-doc
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const result = reader.result as string;
+            const fileBase64 = result.includes(',') ? result.split(',')[1] : result;
 
-        const res = await fetch('/api/parse-doc', {
-          method: 'POST',
-          body: formData,
-        });
+            const res = await fetch('/api/parse-doc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ fileBase64 }),
+            });
 
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Word 檔案解析失敗');
-        }
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+              throw new Error(data.error || 'Word 檔案解析失敗');
+            }
 
-        onFileLoaded({
-          id: 'file_' + Date.now(),
-          name: fileName,
-          size: fileSize,
-          type: 'docx',
-          uploadDate: new Date().toLocaleDateString('zh-TW'),
-          wordCount: data.wordCount || data.text.length,
-          rawText: data.text,
-        });
-        setIsParsing(false);
+            onFileLoaded({
+              id: 'file_' + Date.now(),
+              name: fileName,
+              size: fileSize,
+              type: 'docx',
+              uploadDate: new Date().toLocaleDateString('zh-TW'),
+              wordCount: data.wordCount || data.text.length,
+              rawText: data.text,
+            });
+            setIsParsing(false);
+          } catch (err: any) {
+            setParseError(err.message || 'Word 讀取失敗');
+            setIsParsing(false);
+          }
+        };
+        reader.onerror = () => {
+          setParseError('Word 檔案讀取失敗，請重試。');
+          setIsParsing(false);
+        };
+        reader.readAsDataURL(file);
       } else if (lowerName.endsWith('.txt') || lowerName.endsWith('.md')) {
         // Plain text or markdown
         const text = await file.text();
@@ -246,7 +288,17 @@ export const FileUploadSection: React.FC<FileUploadSectionProps> = ({
                 </span>
               </div>
 
-              {currentFile.rawText && (
+              {currentFile.isScanned && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-300 text-amber-900 text-xs leading-relaxed flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">掃描版 PDF 提醒（共 {currentFile.pageCount || 1} 頁）：</span>
+                    偵測到本檔案無純文字層，判定為掃描件。掃描版文件分析可能耗時較長、API 成本較高，請在右側設定中選擇支援視覺分析能力之 AI 模型（如 Gemini 2.5 Flash 或 Llama 4 Maverick）。
+                  </div>
+                </div>
+              )}
+
+              {currentFile.rawText && currentFile.rawText.trim().length > 0 && (
                 <div className="mt-4 p-3 bg-white text-xs text-[#1A1A1A]/80 border border-[#1A1A1A]/10 font-serif italic max-h-24 overflow-y-auto leading-relaxed">
                   <p className="line-clamp-3">
                     {currentFile.rawText.slice(0, 300)}...

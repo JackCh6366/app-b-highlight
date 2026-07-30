@@ -26,8 +26,18 @@ export function generateMarkdownNote(
 
   if (result.keyTakeaways && result.keyTakeaways.length > 0) {
     md += `## 🎯 核心關鍵重點 (Key Takeaways)\n\n`;
-    result.keyTakeaways.forEach((takeaway, idx) => {
-      md += `${idx + 1}. ${takeaway}\n`;
+    result.keyTakeaways.forEach((takeaway: any, idx) => {
+      if (typeof takeaway === 'string') {
+        md += `${idx + 1}. ${takeaway}\n`;
+      } else {
+        md += `### ${idx + 1}. ${takeaway.title || '核心重點'}\n`;
+        if (Array.isArray(takeaway.points)) {
+          takeaway.points.forEach((pt: string) => {
+            md += `- ${pt}\n`;
+          });
+        }
+        md += `\n`;
+      }
     });
     md += `\n`;
   }

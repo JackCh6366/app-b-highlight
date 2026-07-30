@@ -19,7 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { DocumentSummaryResult, FileMetadata, ChatMessage } from '../types';
+import { DocumentSummaryResult, FileMetadata, ChatMessage, SummaryOptions } from '../types';
 import { generateMarkdownNote, downloadFile, copyToClipboard } from '../utils/exportUtils';
 import { saveNote } from '../utils/storageUtils';
 import { MindMapViewer } from './MindMapViewer';
@@ -28,12 +28,14 @@ import { FlashcardViewer } from './FlashcardViewer';
 interface SummaryResultViewProps {
   result: DocumentSummaryResult;
   fileInfo: FileMetadata | null;
+  options?: SummaryOptions;
   onSaveSuccess: () => void;
 }
 
 export const SummaryResultView: React.FC<SummaryResultViewProps> = ({
   result,
   fileInfo,
+  options,
   onSaveSuccess,
 }) => {
   const [activeTab, setActiveTab] = useState<
@@ -123,6 +125,7 @@ export const SummaryResultView: React.FC<SummaryResultViewProps> = ({
           messages: newMessages,
           documentSummary: result,
           rawTextSnippet: fileInfo?.rawText || '',
+          options,
         }),
       });
 
@@ -288,17 +291,34 @@ export const SummaryResultView: React.FC<SummaryResultViewProps> = ({
                   <span>核心洞察與關鍵重點 (Key Takeaways)</span>
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {result.keyTakeaways.map((point, idx) => (
-                    <div
-                      key={idx}
-                      className="p-5 bg-[#F9F8F6] border border-[#1A1A1A]/10 hover:border-[#1A1A1A] transition-all flex items-start gap-3"
-                    >
-                      <span className="flex shrink-0 w-6 h-6 bg-[#1A1A1A] text-[#F9F8F6] font-serif italic font-bold text-xs items-center justify-center">
-                        {idx + 1}
-                      </span>
-                      <p className="text-xs text-[#1A1A1A]/80 leading-relaxed font-sans">{point}</p>
-                    </div>
-                  ))}
+                  {result.keyTakeaways.map((item: any, idx: number) => {
+                    const isObject = typeof item === 'object' && item !== null;
+                    const title = isObject ? item.title : `重點 ${idx + 1}`;
+                    const points: string[] = isObject
+                      ? Array.isArray(item.points) ? item.points : []
+                      : [String(item)];
+
+                    return (
+                      <div
+                        key={idx}
+                        className="p-5 bg-[#F9F8F6] border border-[#1A1A1A]/10 hover:border-[#1A1A1A] transition-all space-y-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="flex shrink-0 w-6 h-6 bg-[#1A1A1A] text-[#F9F8F6] font-serif italic font-bold text-xs items-center justify-center">
+                            {idx + 1}
+                          </span>
+                          <h4 className="text-xs font-bold text-[#1A1A1A] font-serif italic">{title}</h4>
+                        </div>
+                        <ul className="space-y-1.5 pl-3">
+                          {points.map((pt, pIdx) => (
+                            <li key={pIdx} className="text-xs text-[#1A1A1A]/80 leading-relaxed list-disc marker:text-[#1A1A1A]">
+                              {pt}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -1,0 +1,20 @@
+{
+  "functions": {
+    "api/summarize.ts": {
+      "maxDuration": 60
+    },
+    "api/summarize-long.ts": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

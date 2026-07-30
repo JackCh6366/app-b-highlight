@@ -23,6 +23,7 @@ export default function App() {
   });
 
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStatusMessage, setLoadingStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [summaryResult, setSummaryResult] = useState<DocumentSummaryResult | null>(null);
   const [savedNotesCount, setSavedNotesCount] = useState<number>(0);
@@ -41,8 +42,17 @@ export default function App() {
     setIsLoading(true);
     setErrorMessage(null);
 
+    const isLongDoc = (currentFile.wordCount && currentFile.wordCount > 30000) || (currentFile.rawText && currentFile.rawText.length > 30000);
+    const endpoint = isLongDoc ? '/api/summarize-long' : '/api/summarize';
+
+    if (isLongDoc) {
+      setLoadingStatusMessage('長文件（超過 30,000 字）已自動切分為多個段落逐段深度分析中...');
+    } else {
+      setLoadingStatusMessage(null);
+    }
+
     try {
-      const res = await fetch('/api/summarize', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -51,6 +61,7 @@ export default function App() {
           rawText: currentFile.rawText || '',
           pdfBase64: currentFile.base64Data || null,
           fileName: currentFile.name,
+          isScanned: currentFile.isScanned || false,
           options,
         }),
       });
@@ -77,6 +88,7 @@ export default function App() {
       setErrorMessage(msg);
     } finally {
       setIsLoading(false);
+      setLoadingStatusMessage(null);
     }
   };
 
@@ -164,6 +176,8 @@ export default function App() {
                     setOptions={setOptions}
                     onStartSummarize={handleStartSummarize}
                     isLoading={isLoading}
+                    loadingStatusMessage={loadingStatusMessage}
+                    isScanned={currentFile?.isScanned}
                     disabled={!currentFile}
                   />
                 </div>
@@ -173,6 +187,7 @@ export default function App() {
               <SummaryResultView
                 result={summaryResult}
                 fileInfo={currentFile}
+                options={options}
                 onSaveSuccess={handleUpdateSavedNotesCount}
               />
             )}
