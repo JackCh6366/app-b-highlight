@@ -29,6 +29,60 @@ function getNvidiaClient() {
   });
 }
 
+/**
+ * 偵測 AI 回傳內容是否陷入重複性迴圈 (Degenerate Repetition Loop)。
+ * 本函式是為了防止中小型模型在生成結構化 JSON 時，因為沒有懲罰機制而反覆輸出無意義的相同詞彙。
+ * 
+ * 偵測邏輯：
+ * 1. 使用正規表示式將文字切分成 token（支援英文單字與中文單字/字元）。
+ * 2. 計算連續 5 個 token 的 5-gram 出現頻率。
+ * 3. 若某個 5-gram 的出現頻率佔整體 tokens 的比例過高（例如大於 5% 且出現次數大於 8 次），判定為重複。
+ * 4. 同時檢查 3-gram 的連續重複，若同一個 3-gram 連續重複出現 6 次以上，判定為重複。
+ */
+export function detectRepetitionLoop(text: string): boolean {
+  if (!text || text.length < 150) return false;
+
+  const tokens = text.match(/[\u4e00-\u9fa5]|[a-zA-Z0-9']+/g) || [];
+  if (tokens.length < 50) return false;
+
+  const tokensLower = tokens.map(t => t.toLowerCase());
+
+  // 1. 檢查 n-gram (n=5) 的重複率
+  const n = 5;
+  const counts: Record<string, number> = {};
+  for (let i = 0; i <= tokensLower.length - n; i++) {
+    const gram = tokensLower.slice(i, i + n).join(' ');
+    counts[gram] = (counts[gram] || 0) + 1;
+  }
+
+  // 門檻：佔總 token 的 5%，且至少出現 8 次
+  const thresholdCount = Math.max(8, tokensLower.length * 0.05);
+  for (const gram in counts) {
+    if (counts[gram] > thresholdCount) {
+      return true;
+    }
+  }
+
+  // 2. 檢查 3-gram 的連續重複 (例如 "Blueprint Architecture Matrix Blueprint Architecture Matrix ...")
+  const m = 3;
+  let consecutiveCount = 0;
+  let lastGram = '';
+  for (let i = 0; i <= tokensLower.length - m; i += m) {
+    const gram = tokensLower.slice(i, i + m).join(' ');
+    if (gram === lastGram) {
+      consecutiveCount++;
+      if (consecutiveCount >= 6) {
+        return true;
+      }
+    } else {
+      lastGram = gram;
+      consecutiveCount = 1;
+    }
+  }
+
+  return false;
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -85,6 +139,11 @@ function chunkText(rawText: string, maxChunkLength = 15000): string[] {
   return finalChunks;
 }
 
+/**
+ * 【搶救機制/最後防線】：
+ * 當 AI 產生的 JSON 字串因長度上限或錯誤被截斷時，此函式會嘗試清除無效結尾、補齊未閉合的括號。
+ * 請注意：此為最後防線搶救機制，在正常流程中，若偵測到重複性迴圈，應優先透過 API 重複性偵測與重試機制排除，避免走到這一步。
+ */
 function safeParseJSON(jsonString: string): any {
   if (!jsonString) return {};
 
@@ -360,14 +419,43 @@ ${truncatedText}
   "suggestedQuestions": ["..."]
 }`;
 
-      const completion = await nvidia.chat.completions.create({
+      // 呼叫 NVIDIA NIM API，加入 frequency_penalty 與 presence_penalty 重複懲罰參數以避免 degenerate repetition
+      let completion = await nvidia.chat.completions.create({
         model: selectedModel,
         messages: [{ role: 'user', content: nvidiaPrompt }],
         temperature: 0.2,
         max_tokens: 8000,
+        frequency_penalty: 0.4, // 懲罰重複 token
+        presence_penalty: 0.3,   // 懲罰已出現 token
       });
 
-      const rawOutput = completion.choices[0]?.message?.content || '{}';
+      let rawOutput = completion.choices[0]?.message?.content || '{}';
+
+      // 檢查是否陷入重複迴圈
+      if (detectRepetitionLoop(rawOutput)) {
+        console.warn(`[NVIDIA Repetition Detected] Model ${selectedModel} output contains repetition loop. Retrying with lower temperature (0.05) and higher penalty parameters...`);
+        
+        // 降低溫度 (0.05 < 0.1) 增加確定性，提高懲罰係數進行重試
+        completion = await nvidia.chat.completions.create({
+          model: selectedModel,
+          messages: [{ role: 'user', content: nvidiaPrompt }],
+          temperature: 0.05,
+          max_tokens: 8000,
+          frequency_penalty: 0.6,
+          presence_penalty: 0.5,
+        });
+
+        rawOutput = completion.choices[0]?.message?.content || '{}';
+
+        // 若重試後依然陷入重複迴圈，直接回傳錯誤提示，避免回傳殘缺/被截斷的 JSON 結果
+        if (detectRepetitionLoop(rawOutput)) {
+          console.error(`[NVIDIA Repetition Failure] Model ${selectedModel} retry still failed with repetition loop.`);
+          return res.status(500).json({
+            error: '此模型在生成本文件大綱時發生重複輸出問題，建議切換至 gemini-3.6-flash 或縮短文件內容後重試。',
+          });
+        }
+      }
+
       let parsedData = safeParseJSON(rawOutput);
       if (parsedData && parsedData.mindmap) {
         parsedData.mindmap = sanitizeMindMap(parsedData.mindmap, '0');
