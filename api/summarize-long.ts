@@ -379,7 +379,7 @@ ${truncatedText}
       const maxChunks = 4;
       const effectiveChunks = chunks.length > maxChunks ? chunks.slice(0, maxChunks) : chunks;
 
-      const chunkResults = await processInParallelBatches(effectiveChunks, 3, async (chunk, i) => {
+      const chunkResults = await processInParallelBatches(effectiveChunks, 4, async (chunk, i) => {
         const mapPrompt = `請簡要分析以下長文件第 ${i + 1} / ${effectiveChunks.length} 段落內容，提取核心概念與重要數據：\n\n${chunk}`;
         const ai = getGenAI();
         const response = await ai.models.generateContent({

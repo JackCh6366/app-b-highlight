@@ -1,19 +1,19 @@
 {
   "functions": {
     "api/summarize.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "api/summarize-long.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "api/chat.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     },
     "api/parse-pdf.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/parse-doc.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "rewrites": [
