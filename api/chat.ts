@@ -44,7 +44,7 @@ export default async function handler(req: any, res: any) {
 
     if (!selectedModel) {
       if (provider === 'nvidia_nim' || provider === 'nvidia') {
-        selectedModel = 'nvidia/nemotron-3-ultra-550b-a55b';
+        selectedModel = 'nvidia/llama-3.1-nemotron-70b-instruct';
       } else {
         selectedModel = 'gemini-3.6-flash';
       }

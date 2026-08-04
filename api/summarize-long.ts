@@ -83,6 +83,157 @@ export function detectRepetitionLoop(text: string): boolean {
   return false;
 }
 
+/**
+ * 檢查解析出的 JSON 資料是否不完整或欄位嚴重缺失。
+ * 檢查項目包括：大綱、關鍵字詞、複習卡、核心重點等陣列是否為空或數量極少。
+ */
+export function isResultIncomplete(parsedData: any): boolean {
+  if (!parsedData || typeof parsedData !== 'object') return true;
+
+  // 檢查關鍵欄位是否存在且為非空陣列/非空字串
+  const outlineLength = Array.isArray(parsedData.structuredOutline) ? parsedData.structuredOutline.length : 0;
+  const termsLength = Array.isArray(parsedData.keyTerms) ? parsedData.keyTerms.length : 0;
+  const cardsLength = Array.isArray(parsedData.flashcards) ? parsedData.flashcards.length : 0;
+  const takeawaysLength = Array.isArray(parsedData.keyTakeaways) ? parsedData.keyTakeaways.length : 0;
+
+  // 如果這幾個核心陣列全部都是空的，或者大綱項目太少，視為不完整
+  if (outlineLength === 0 && termsLength === 0 && cardsLength === 0 && takeawaysLength === 0) {
+    return true;
+  }
+
+  // 大綱 (structuredOutline) 是最關鍵的欄位，如果大綱為空，那肯定是殘缺的
+  if (outlineLength === 0) {
+    return true;
+  }
+
+  // 總計項目數過低（大綱 + 重點 + 關鍵詞 + 複習卡 < 4 個項目，可適當放寬以免將極度精簡的檔案誤判）
+  const totalItems = outlineLength + termsLength + cardsLength + takeawaysLength;
+  if (totalItems < 4) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 動態產生 Google Gemini API 使用的 JSON Schema。
+ * 支援「簡化模式（simplified: true）」，即移除非核心欄位（如 flashcards、importantQuotes、suggestedQuestions），
+ * 藉此在重試時降低模型生成負擔，留存更多 token 空間給核心結構。
+ */
+function getGeminiSchema(simplified: boolean) {
+  const schema: any = {
+    type: Type.OBJECT,
+    properties: {
+      documentTitle: { type: Type.STRING },
+      executiveSummary: { type: Type.STRING },
+      mindmap: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          label: { type: Type.STRING },
+          children: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                label: { type: Type.STRING },
+                children: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.STRING },
+                      label: { type: Type.STRING },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        required: ['label'],
+      },
+      keyTakeaways: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            points: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ['title', 'points'],
+        },
+      },
+      structuredOutline: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            section: { type: Type.STRING },
+            summary: { type: Type.STRING },
+            points: { type: Type.ARRAY, items: { type: Type.STRING } },
+            subSections: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  detail: { type: Type.STRING },
+                },
+              },
+            },
+          },
+          required: ['section', 'summary', 'points'],
+        },
+      },
+      keyTerms: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            term: { type: Type.STRING },
+            definition: { type: Type.STRING },
+            context: { type: Type.STRING },
+          },
+          required: ['term', 'definition'],
+        },
+      },
+      actionablePoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+    },
+    required: [
+      'documentTitle',
+      'executiveSummary',
+      'mindmap',
+      'keyTakeaways',
+      'structuredOutline',
+      'keyTerms',
+      'actionablePoints',
+    ],
+  };
+
+  if (!simplified) {
+    schema.properties.flashcards = {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          question: { type: Type.STRING },
+          answer: { type: Type.STRING },
+          tag: { type: Type.STRING },
+        },
+        required: ['question', 'answer'],
+      },
+    };
+    schema.properties.importantQuotes = { type: Type.ARRAY, items: { type: Type.STRING } };
+    schema.properties.suggestedQuestions = { type: Type.ARRAY, items: { type: Type.STRING } };
+    
+    schema.required.push('flashcards', 'importantQuotes', 'suggestedQuestions');
+  }
+
+  return schema;
+}
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -338,7 +489,7 @@ export default async function handler(req: any, res: any) {
 
     if (!selectedModel) {
       if (provider === 'nvidia_nim' || provider === 'nvidia') {
-        selectedModel = 'nvidia/nemotron-3-ultra-550b-a55b';
+        selectedModel = 'nvidia/llama-3.1-nemotron-70b-instruct';
       } else {
         selectedModel = 'gemini-3.6-flash';
       }
@@ -356,7 +507,9 @@ export default async function handler(req: any, res: any) {
           const ai = getGenAI();
           const cleanPdfBase64 = typeof pdfBase64 === 'string' ? pdfBase64.replace(/^data:[^;]+;base64,/, '') : pdfBase64;
           const systemInstruction = buildSystemInstruction(options);
-          const response = await ai.models.generateContent({
+          
+          let responseSchema = getGeminiSchema(false);
+          let response = await ai.models.generateContent({
             model: selectedModel,
             contents: {
               parts: [
@@ -367,11 +520,58 @@ export default async function handler(req: any, res: any) {
             config: {
               systemInstruction,
               responseMimeType: 'application/json',
+              responseSchema,
               maxOutputTokens: 32000,
             },
           });
-          const resultText = response.text || '{}';
+
+          let candidate = response.candidates?.[0];
+          let finishReason = candidate?.finishReason;
+          let resultText = response.text || '{}';
           let parsedData = safeParseJSON(resultText);
+          let isTruncated = finishReason === 'MAX_TOKENS';
+          let isIncomplete = isResultIncomplete(parsedData);
+
+          if (isTruncated || isIncomplete) {
+            console.warn(`[Gemini Vision Truncation/Incomplete Detected] Truncated: ${isTruncated}, Incomplete: ${isIncomplete}. Retrying with simplified schema...`);
+            
+            responseSchema = getGeminiSchema(true);
+            response = await ai.models.generateContent({
+              model: selectedModel,
+              contents: {
+                parts: [
+                  { inlineData: { mimeType: 'application/pdf', data: cleanPdfBase64 } },
+                  { text: `請詳細閱讀這份掃描版 PDF 檔案「${fileName || 'PDF文件'}」的內容，並進行長文件整理歸納。` },
+                ],
+              },
+              config: {
+                systemInstruction,
+                responseMimeType: 'application/json',
+                responseSchema,
+                maxOutputTokens: 32000,
+              },
+            });
+
+            candidate = response.candidates?.[0];
+            finishReason = candidate?.finishReason;
+            resultText = response.text || '{}';
+            parsedData = safeParseJSON(resultText);
+            isTruncated = finishReason === 'MAX_TOKENS';
+            isIncomplete = isResultIncomplete(parsedData);
+
+            if (isTruncated || isIncomplete) {
+              console.error(`[Gemini Vision Validation Failure] Simplified retry still failed. Truncated: ${isTruncated}, Incomplete: ${isIncomplete}.`);
+              return res.status(500).json({
+                error: 'AI 在生成本文件的完整大綱時輸出不完整，可能是文件內容過長或過於複雜，建議嘗試「極簡核心要點」模式，或將文件拆分後個別上傳。',
+              });
+            }
+
+            // Backfill empty arrays for simplified response fields
+            parsedData.flashcards = parsedData.flashcards || [];
+            parsedData.importantQuotes = parsedData.importantQuotes || [];
+            parsedData.suggestedQuestions = parsedData.suggestedQuestions || [];
+          }
+
           if (parsedData && parsedData.mindmap) {
             parsedData.mindmap = sanitizeMindMap(parsedData.mindmap, '0');
           }
@@ -394,6 +594,7 @@ export default async function handler(req: any, res: any) {
     // For Gemini: use parallel map-reduce since it's fast enough
 
     if (provider === 'nvidia') {
+      const startTime = Date.now();
       // NVIDIA models are slower; send truncated raw text directly in one call
       const truncatedText = activeText.slice(0, 30000);
       const systemInstruction = buildSystemInstruction(options);
@@ -419,37 +620,81 @@ ${truncatedText}
   "suggestedQuestions": ["..."]
 }`;
 
-      // 呼叫 NVIDIA NIM API，加入 frequency_penalty 與 presence_penalty 重複懲罰參數以避免 degenerate repetition
-      let completion = await nvidia.chat.completions.create({
-        model: selectedModel,
-        messages: [{ role: 'user', content: nvidiaPrompt }],
-        temperature: 0.2,
-        max_tokens: 8000,
-        frequency_penalty: 0.4, // 懲罰重複 token
-        presence_penalty: 0.3,   // 懲罰已出現 token
-      });
+      let completion;
+      try {
+        // 呼叫 NVIDIA NIM API，加入 frequency_penalty 與 presence_penalty，並設定第一次呼叫 timeout 為 18000ms
+        completion = await nvidia.chat.completions.create({
+          model: selectedModel,
+          messages: [{ role: 'user', content: nvidiaPrompt }],
+          temperature: 0.2,
+          max_tokens: 8000,
+          frequency_penalty: 0.4,
+          presence_penalty: 0.3,
+        }, {
+          timeout: 18000,
+        });
+      } catch (error: any) {
+        console.error("NVIDIA call failed:", error);
+        const status = error?.status || error?.statusCode || (error?.message?.includes('status code') ? parseInt(error.message.match(/\d+/)?.[0] || '0') : 0);
+        const errMsg = error?.message || '';
+        if (status === 410 || errMsg.includes('410')) {
+          return res.status(500).json({
+            error: '此 NVIDIA 模型目前無法使用（該端點可能已下線或被取代），請切換至其他模型。',
+          });
+        }
+        if (status === 503 || status === 429 || errMsg.includes('503') || errMsg.includes('ResourceExhausted')) {
+          return res.status(500).json({
+            error: '此 NVIDIA 模型目前伺服器負載過高或容量已滿，請切換至其他模型或稍後重試。',
+          });
+        }
+        throw error;
+      }
 
       let rawOutput = completion.choices[0]?.message?.content || '{}';
 
       // 檢查是否陷入重複迴圈
       if (detectRepetitionLoop(rawOutput)) {
-        console.warn(`[NVIDIA Repetition Detected] Model ${selectedModel} output contains repetition loop. Retrying with lower temperature (0.05) and higher penalty parameters...`);
-        
-        // 降低溫度 (0.05 < 0.1) 增加確定性，提高懲罰係數進行重試
-        completion = await nvidia.chat.completions.create({
-          model: selectedModel,
-          messages: [{ role: 'user', content: nvidiaPrompt }],
-          temperature: 0.05,
-          max_tokens: 8000,
-          frequency_penalty: 0.6,
-          presence_penalty: 0.5,
-        });
+        const elapsed = Date.now() - startTime;
+        if (elapsed > 35000) {
+          console.warn(`[NVIDIA Repetition Loop] Detected repetition but elapsed time ${elapsed}ms exceeds safe threshold (35000ms). Skipping retry.`);
+          return res.status(500).json({
+            error: '此模型在生成大綱時發生重複輸出問題，且已無足夠時間重試，請切換至 gemini-3.6-flash 或選用回應較快的模型。',
+          });
+        }
 
-        rawOutput = completion.choices[0]?.message?.content || '{}';
+        console.warn(`[NVIDIA Repetition Loop] Detected repetition after ${elapsed}ms. Retrying with lower temperature (0.05) and higher penalty parameters...`);
+        try {
+          // 降低溫度，提高重複懲罰，並將重試 timeout 設定為 15000ms
+          completion = await nvidia.chat.completions.create({
+            model: selectedModel,
+            messages: [{ role: 'user', content: nvidiaPrompt }],
+            temperature: 0.05,
+            max_tokens: 8000,
+            frequency_penalty: 0.6,
+            presence_penalty: 0.5,
+          }, {
+            timeout: 15000,
+          });
+          rawOutput = completion.choices[0]?.message?.content || '{}';
+        } catch (error: any) {
+          console.error("NVIDIA retry failed:", error);
+          const status = error?.status || error?.statusCode || (error?.message?.includes('status code') ? parseInt(error.message.match(/\d+/)?.[0] || '0') : 0);
+          const errMsg = error?.message || '';
+          if (status === 410 || errMsg.includes('410')) {
+            return res.status(500).json({
+              error: '此 NVIDIA 模型目前無法使用（該端點可能已下線或被取代），請切換至其他模型。',
+            });
+          }
+          if (status === 503 || status === 429 || errMsg.includes('503') || errMsg.includes('ResourceExhausted')) {
+            return res.status(500).json({
+              error: '此 NVIDIA 模型目前伺服器負載過高或容量已滿，請切換至其他模型或稍後重試。',
+            });
+          }
+          throw error;
+        }
 
-        // 若重試後依然陷入重複迴圈，直接回傳錯誤提示，避免回傳殘缺/被截斷的 JSON 結果
         if (detectRepetitionLoop(rawOutput)) {
-          console.error(`[NVIDIA Repetition Failure] Model ${selectedModel} retry still failed with repetition loop.`);
+          console.error(`[NVIDIA Repetition Failure] Retry still failed with repetition loop.`);
           return res.status(500).json({
             error: '此模型在生成本文件大綱時發生重複輸出問題，建議切換至 gemini-3.6-flash 或縮短文件內容後重試。',
           });
@@ -485,115 +730,8 @@ ${truncatedText}
       const ai = getGenAI();
       const reduceContent = `【文件標題/檔名】：${fileName || '長文件'}\n\n【長文件全篇分段研析彙整資訊】：\n${combinedNotes}`;
 
-      const responseSchema = {
-        type: Type.OBJECT,
-        properties: {
-          documentTitle: { type: Type.STRING },
-          executiveSummary: { type: Type.STRING },
-          mindmap: {
-            type: Type.OBJECT,
-            properties: {
-              id: { type: Type.STRING },
-              label: { type: Type.STRING },
-              children: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    label: { type: Type.STRING },
-                    children: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          id: { type: Type.STRING },
-                          label: { type: Type.STRING },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            required: ['label'],
-          },
-          keyTakeaways: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                points: { type: Type.ARRAY, items: { type: Type.STRING } },
-              },
-              required: ['title', 'points'],
-            },
-          },
-          structuredOutline: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                section: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                points: { type: Type.ARRAY, items: { type: Type.STRING } },
-                subSections: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      detail: { type: Type.STRING },
-                    },
-                  },
-                },
-              },
-              required: ['section', 'summary', 'points'],
-            },
-          },
-          keyTerms: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                term: { type: Type.STRING },
-                definition: { type: Type.STRING },
-                context: { type: Type.STRING },
-              },
-              required: ['term', 'definition'],
-            },
-          },
-          flashcards: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                question: { type: Type.STRING },
-                answer: { type: Type.STRING },
-                tag: { type: Type.STRING },
-              },
-              required: ['question', 'answer'],
-            },
-          },
-          actionablePoints: { type: Type.ARRAY, items: { type: Type.STRING } },
-          importantQuotes: { type: Type.ARRAY, items: { type: Type.STRING } },
-          suggestedQuestions: { type: Type.ARRAY, items: { type: Type.STRING } },
-        },
-        required: [
-          'documentTitle',
-          'executiveSummary',
-          'mindmap',
-          'keyTakeaways',
-          'structuredOutline',
-          'keyTerms',
-          'flashcards',
-          'actionablePoints',
-          'importantQuotes',
-          'suggestedQuestions',
-        ],
-      };
-
-      const response = await ai.models.generateContent({
+      let responseSchema = getGeminiSchema(false);
+      let response = await ai.models.generateContent({
         model: selectedModel,
         contents: reduceContent,
         config: {
@@ -604,8 +742,48 @@ ${truncatedText}
         },
       });
 
-      const resultText = response.text || '{}';
+      let candidate = response.candidates?.[0];
+      let finishReason = candidate?.finishReason;
+      let resultText = response.text || '{}';
       let parsedData = safeParseJSON(resultText);
+      let isTruncated = finishReason === 'MAX_TOKENS';
+      let isIncomplete = isResultIncomplete(parsedData);
+
+      if (isTruncated || isIncomplete) {
+        console.warn(`[Gemini Reduce Truncation/Incomplete Detected] Truncated: ${isTruncated} (finishReason: ${finishReason}), Incomplete: ${isIncomplete}. Retrying with simplified schema...`);
+        
+        responseSchema = getGeminiSchema(true); // Simplified schema: removes flashcards, importantQuotes, suggestedQuestions
+        response = await ai.models.generateContent({
+          model: selectedModel,
+          contents: reduceContent,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema,
+            maxOutputTokens: 32000,
+          },
+        });
+
+        candidate = response.candidates?.[0];
+        finishReason = candidate?.finishReason;
+        resultText = response.text || '{}';
+        parsedData = safeParseJSON(resultText);
+        isTruncated = finishReason === 'MAX_TOKENS';
+        isIncomplete = isResultIncomplete(parsedData);
+
+        if (isTruncated || isIncomplete) {
+          console.error(`[Gemini Reduce Validation Failure] Simplified retry still failed. Truncated: ${isTruncated}, Incomplete: ${isIncomplete}.`);
+          return res.status(500).json({
+            error: 'AI 在生成本文件的完整大綱時輸出不完整，可能是文件內容過長或過於複雜，建議嘗試「極簡核心要點」模式，或將文件拆分後個別上傳。',
+          });
+        }
+
+        // Backfill empty arrays for simplified response fields so frontend can render without exceptions
+        parsedData.flashcards = parsedData.flashcards || [];
+        parsedData.importantQuotes = parsedData.importantQuotes || [];
+        parsedData.suggestedQuestions = parsedData.suggestedQuestions || [];
+      }
+
       if (parsedData && parsedData.mindmap) {
         parsedData.mindmap = sanitizeMindMap(parsedData.mindmap, '0');
       }

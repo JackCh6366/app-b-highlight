@@ -166,8 +166,8 @@ export const OptionsConfigSection: React.FC<OptionsConfigSectionProps> = ({
               <option value="gemini::gemini-3.5-flash-lite">gemini-3.5-flash-lite（快速模式）</option>
             </optgroup>
             <optgroup label="NVIDIA NIM (OpenAI 相容端點)">
-              <option value="nvidia_nim::nvidia/nemotron-3-ultra-550b-a55b" disabled={isScanned}>
-                nvidia/nemotron-3-ultra-550b-a55b（深度推理（NVIDIA 旗艦））{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
+              <option value="nvidia_nim::nvidia/llama-3.1-nemotron-70b-instruct" disabled={isScanned}>
+                nvidia/llama-3.1-nemotron-70b-instruct（深度推理（NVIDIA 旗艦））{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
               </option>
               <option value="nvidia_nim::meta/llama-3.3-70b-instruct" disabled={isScanned}>
                 meta/llama-3.3-70b-instruct{isScanned ? '｜⚠ 掃描版 PDF 不支援' : ''}
